@@ -2,8 +2,11 @@
 
 #july 14 2026, new script universal to set FreeBSD 15.1 as a workstation
 
-use post-install-new.sh
-
-wget https://github.com/msartor99/FreeBSD-base/blob/e27fe1712ec04177e193d3902b336fb98a41f133/post-install-new.sh
+to use post-install-new.sh
 
 
+wget -O post-install-new.sh https://raw.githubusercontent.com/msartor99/FreeBSD-base/main/post-install-new.sh
+
+chmod +x post-install-new.sh
+
+./post-install-new.sh
