@@ -383,9 +383,34 @@ EOF
     pkg install -y ImageMagick7
     magick /tmp/fb14_assets/nasa1920.png -define png:color-type=6 /boot/images/splash.png
     
-    # --- UTILISATION DE NASA1920.PNG POUR L'ARRET (RGBA 32 bits strict) ---
+    # Utilisation de nasa1920.png pour l'arrêt (RGBA 32 bits strict)
     magick /tmp/fb14_assets/nasa1920.png -resize 1920x1080 -define png:color-type=6 /boot/images/shutdown_splash.png
     
+    # --- LE FIX : Remplacement de l'aperçu Maldives par un bel aperçu NASA ---
+    # 1. On supprime la photo d'origine de Maldives pour nettoyer le dossier
+    rm -f /usr/local/share/sddm/themes/nasa/maldives.jpg
+
+    # 2. On génère une vraie miniature NASA en 16:9 de 600x338 pour l'écran de sélection de SDDM
+    magick /tmp/fb14_assets/nasa1920.png -resize 600x338 /usr/local/share/sddm/themes/nasa/preview.png
+    chmod 644 /usr/local/share/sddm/themes/nasa/preview.png
+
+    # 3. Correction forcée de metadata.desktop pour cibler preview.png et s'assurer que le nom est bien NASA
+    if [ -f /usr/local/share/sddm/themes/nasa/metadata.desktop ]; then
+        sed -i '' 's/Screenshot=.*/Screenshot=preview.png/g' /usr/local/share/sddm/themes/nasa/metadata.desktop
+        sed -i '' 's/Name=.*/Name=NASA/g' /usr/local/share/sddm/themes/nasa/metadata.desktop
+    fi
+
+    # 4. Nettoyage agressif des caches pour forcer Plasma à oublier la plage des Maldives
+    for u in root administrateur; do
+        if [ -d "/home/$u" ]; then
+            rm -rf "/home/$u/.cache/thumbnails/"
+            rm -rf "/home/$u/.cache/qmlcache/"
+        elif [ "$u" = "root" ]; then
+            rm -rf "/root/.cache/thumbnails/"
+            rm -rf "/root/.cache/qmlcache/"
+        fi
+    done
+
     # Application au chargeur de démarrage
     sysrc -f /boot/loader.conf splash="/boot/images/splash.png" shutdown_splash="/boot/images/shutdown_splash.png"
 
