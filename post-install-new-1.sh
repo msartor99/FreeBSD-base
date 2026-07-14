@@ -159,14 +159,13 @@ EOF
     mkdir -p /usr/local/etc/X11/xorg.conf.d/
 
     # --- UNLOCK CTRL+ALT+BACKSPACE ---
-    # On force explicitement le serveur Xorg à autoriser l'extinction brutale avec la touche d'effacement
     cat >/usr/local/etc/X11/xorg.conf.d/10-serverflags.conf <<EOF
 Section "ServerFlags"
     Option "DontZap" "false"
 EndSection
 EOF
 
-    # Configuration du clavier suisse-romand avec l'option de secours
+    # Configuration du clavier suisse-romand
     cat >/usr/local/etc/X11/xorg.conf.d/20-keyboards.conf <<EOF
 Section "InputClass"
     Identifier "All Keyboards"
@@ -221,8 +220,7 @@ nvidia_config() {
     # --- ÉTAPE CRUCIALE : Préparation STRICTE de l'environnement Linux ---
     bsddialog --infobox "Préparation de la compatibilité Linux..." 5 60
     
-    # Correction majeure : Injection de linux et linux64 EN TÊTE de la kld_list
-    # Cela garantit qu'au reboot, les modules Linux démarrent AVANT le pilote graphique
+    # Injection de linux et linux64 EN TÊTE de la kld_list pour éviter les crashs au reboot
     clean_kld=$(sysrc -n kld_list | sed -E 's/\b(linux64|linux)\b//g' | xargs)
     sysrc kld_list="linux linux64 $clean_kld"
     sysrc linux_enable="YES"
@@ -314,10 +312,10 @@ plasma_config() {
     cp -rf /tmp/plasma-video-wp/package/* /usr/local/share/plasma/wallpapers/com.github.luisbocanegra.smartvideo/
     rm -rf /tmp/plasma-video-wp
 
-    # 3. Téléchargement de la vidéo d'exemple MP4
+    # 3. Téléchargement de la vidéo d'exemple MP4 (Depuis le dépôt GitHub personnel)
     bsddialog --infobox "Téléchargement de la vidéo de démonstration (MP4)..." 5 70
     mkdir -p /usr/local/share/wallpapers/videos
-    fetch -o /usr/local/share/wallpapers/videos/file_example_MP4.mp4 "https://file-examples.com/storage/fea1e0df996a567f39c40bf/2017/04/file_example_MP4_1920_18MG.mp4"
+    fetch -o /usr/local/share/wallpapers/videos/file_example_MP4.mp4 "https://raw.githubusercontent.com/msartor99/FreeBSD-base/45745e9ee8b15978bd5fd8ffa8383ccd7071e2ee/file_example_MP4_1920_18MG.mp4"
     chmod 644 /usr/local/share/wallpapers/videos/file_example_MP4.mp4
 }
 
@@ -412,7 +410,7 @@ EOF
     # Utilisation de nasa1920.png pour l'arrêt (RGBA 32 bits strict)
     magick convert /tmp/fb14_assets/nasa1920.png -resize 1920x1080 -define png:color-type=6 /boot/images/shutdown_splash.png
     
-    # --- LE FIX : Remplacement de l'aperçu Maldives par un bel aperçu NASA ---
+    # --- Remplacement de l'aperçu Maldives par un bel aperçu NASA ---
     # 1. On supprime la photo d'origine de Maldives pour nettoyer le dossier
     rm -f /usr/local/share/sddm/themes/nasa/maldives.jpg
 
