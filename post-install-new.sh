@@ -109,18 +109,28 @@ cpu_config() {
 }
 
 hardware_config() {
-    bsddialog --infobox "Installing Xorg, Audio, and Peripherals (Wayland removed)..." 5 60
-    pkg install -y pulseaudio pipewire wireplumber audio/freedesktop-sound-theme \
-                   xorg dbus avahi signal-cli seatd sddm \
-                   cups gutenprint cups-filters hplip system-config-printer \
-                   fusefs-ntfs fusefs-ext2 fusefs-hfsfuse
+    bsddialog --infobox "Installing Hardware Base, Xorg and SDDM..." 5 60
+    
+    # 1. Éléments critiques (X11, Gestionnaire de session, DBUS)
+    pkg install -y xorg dbus avahi seatd sddm
+    
+    # 2. Audio
+    pkg install -y pulseaudio pipewire wireplumber freedesktop-sound-theme
+    
+    # 3. Impression (CUPS)
+    pkg install -y cups gutenprint cups-filters hplip system-config-printer
+    
+    # 4. Systèmes de fichiers et Outils (fusefs-ext2 supprimé car natif sous FreeBSD 15)
+    pkg install -y fusefs-ntfs fusefs-hfsfuse signal-cli
     
     sysrc sound_load="YES" snd_hda_load="YES"
     add_line_if_missing "hw.snd.default_unit=1" /etc/sysctl.conf
     
     # Activation des services essentiels pour l'interface graphique
-    sysrc dbus_enable=YES avahi_enable=YES seatd_enable=YES sddm_enable=YES sddm_lang="ch_FR"
+    sysrc dbus_enable=YES avahi_enable=YES seatd_enable=YES sddm_enable=YES sddm_lang="fr_CH.UTF-8"
     sysrc cupsd_enable=YES devfs_system_ruleset=localrules
+    
+    # ext2fs est natif, fusefs gère le NTFS et le HFS
     sysrc kld_list+=fusefs kld_list+=ext2fs
     
     add_line_if_missing "vfs.usermount=1" /etc/sysctl.conf
@@ -147,6 +157,15 @@ EOF
     service devfs restart
 
     mkdir -p /usr/local/etc/X11/xorg.conf.d/
+
+    # --- UNLOCK CTRL+ALT+BACKSPACE ---
+    cat >/usr/local/etc/X11/xorg.conf.d/10-serverflags.conf <<EOF
+Section "ServerFlags"
+    Option "DontZap" "false"
+EndSection
+EOF
+
+    # Configuration du clavier suisse-romand
     cat >/usr/local/etc/X11/xorg.conf.d/20-keyboards.conf <<EOF
 Section "InputClass"
     Identifier "All Keyboards"
@@ -198,15 +217,19 @@ nvidia_config() {
         LINUX_LIBS="linux-nvidia-libs-${SUFFIX}"
     fi
 
-    # --- ÉTAPE CRUCIALE : Préparation & Démarrage de Linux AVANT l'installation NVIDIA ---
-    bsddialog --infobox "Préparation de la compatibilité Linux de base..." 5 60
-    sysrc linux_enable="YES" linux64_enable="YES"
+    # --- ÉTAPE CRUCIALE : Préparation STRICTE de l'environnement Linux ---
+    bsddialog --infobox "Préparation de la compatibilité Linux..." 5 60
     
-    # Force le chargement des modules noyau
+    # Injection de linux et linux64 EN TÊTE de la kld_list pour éviter les crashs au reboot
+    clean_kld=$(sysrc -n kld_list | sed -E 's/\b(linux64|linux)\b//g' | xargs)
+    sysrc kld_list="linux linux64 $clean_kld"
+    sysrc linux_enable="YES"
+    
+    # Chargement impératif des modules pour la session d'installation actuelle
     kldload -n linux 2>/dev/null
     kldload -n linux64 2>/dev/null
     
-    # Installation du framework Linux et démarrage
+    # Installation propre de linux-rl9
     pkg install -y linux-rl9
     service linux restart 2>/dev/null || service linux start
 
@@ -214,8 +237,9 @@ nvidia_config() {
     bsddialog --infobox "Installation de $DRIVER_PKG et $LINUX_LIBS..." 5 60
     pkg install -y "$DRIVER_PKG" "$LINUX_LIBS" libc6-shim nvidia-settings
     
+    # Ajout du module nvidia-modeset à la fin de la kld_list (après linux)
     if ! sysrc -n kld_list | grep -q "nvidia-modeset"; then
-        sysrc kld_list+="nvidia-modeset"
+        sysrc kld_list+=" nvidia-modeset"
     fi
     sysrc nvidia_modeset_enable="YES"
     
@@ -288,10 +312,10 @@ plasma_config() {
     cp -rf /tmp/plasma-video-wp/package/* /usr/local/share/plasma/wallpapers/com.github.luisbocanegra.smartvideo/
     rm -rf /tmp/plasma-video-wp
 
-    # 3. Téléchargement de la vidéo d'exemple MP4
+    # 3. Téléchargement de la vidéo d'exemple MP4 (Depuis le dépôt GitHub personnel)
     bsddialog --infobox "Téléchargement de la vidéo de démonstration (MP4)..." 5 70
     mkdir -p /usr/local/share/wallpapers/videos
-    fetch -o /usr/local/share/wallpapers/videos/file_example_MP4.mp4 "https://file-examples.com/storage/fea1e0df996a567f39c40bf/2017/04/file_example_MP4_1920_18MG.mp4"
+    fetch -o /usr/local/share/wallpapers/videos/file_example_MP4.mp4 "https://raw.githubusercontent.com/msartor99/FreeBSD-base/45745e9ee8b15978bd5fd8ffa8383ccd7071e2ee/file_example_MP4_1920_18MG.mp4"
     chmod 644 /usr/local/share/wallpapers/videos/file_example_MP4.mp4
 }
 
@@ -350,8 +374,8 @@ kamila_splash() {
     cd /tmp || return
     wget -qO v2.png https://kamila.is/media/v2.png
     
-    # Redimensionnement et forçage du canal Alpha (RGBA 32 bits requis, sans warning)
-    magick v2.png -resize 1920x1080 -define png:color-type=6 /boot/images/splash.png
+    # Redimensionnement et forçage du canal Alpha avec "magick convert"
+    magick convert v2.png -resize 1920x1080 -define png:color-type=6 /boot/images/splash.png
     
     # Définition pour le splash de démarrage ET le splash d'extinction
     sysrc -f /boot/loader.conf splash="/boot/images/splash.png" shutdown_splash="/boot/images/splash.png"
@@ -381,17 +405,17 @@ EOF
     # Petit logo pour le démarrage (Forcé en 32 bits)
     bsddialog --infobox "Configuration des images de démarrage et d'arrêt..." 5 70
     pkg install -y ImageMagick7
-    magick /tmp/fb14_assets/nasa1920.png -define png:color-type=6 /boot/images/splash.png
+    magick convert /tmp/fb14_assets/nasa1920.png -define png:color-type=6 /boot/images/splash.png
     
     # Utilisation de nasa1920.png pour l'arrêt (RGBA 32 bits strict)
-    magick /tmp/fb14_assets/nasa1920.png -resize 1920x1080 -define png:color-type=6 /boot/images/shutdown_splash.png
+    magick convert /tmp/fb14_assets/nasa1920.png -resize 1920x1080 -define png:color-type=6 /boot/images/shutdown_splash.png
     
-    # --- LE FIX : Remplacement de l'aperçu Maldives par un bel aperçu NASA ---
+    # --- Remplacement de l'aperçu Maldives par un bel aperçu NASA ---
     # 1. On supprime la photo d'origine de Maldives pour nettoyer le dossier
     rm -f /usr/local/share/sddm/themes/nasa/maldives.jpg
 
     # 2. On génère une vraie miniature NASA en 16:9 de 600x338 pour l'écran de sélection de SDDM
-    magick /tmp/fb14_assets/nasa1920.png -resize 600x338 /usr/local/share/sddm/themes/nasa/preview.png
+    magick convert /tmp/fb14_assets/nasa1920.png -resize 600x338 /usr/local/share/sddm/themes/nasa/preview.png
     chmod 644 /usr/local/share/sddm/themes/nasa/preview.png
 
     # 3. Correction forcée de metadata.desktop pour cibler preview.png et s'assurer que le nom est bien NASA
