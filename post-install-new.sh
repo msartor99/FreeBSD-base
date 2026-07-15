@@ -481,6 +481,89 @@ switch_latest() {
     pkg update -f && pkg upgrade -y
 }
 
+vnc_config() {
+    # 1. Détermination de l'utilisateur de manière intelligente
+    if [ -z "$USER_NAME" ]; then
+        # Si la variable globale USER_NAME est vide, on la demande explicitement
+        VNC_USER=$(bsddialog --title "Configuration X11VNC" --inputbox "Aucun utilisateur configuré. Entrez l'utilisateur système pour VNC :" 8 65 "administrateur" 3>&1 1>&2 2>&3)
+        [ -z "$VNC_USER" ] && return
+    else
+        # Sinon, on récupère directement l'utilisateur saisi à l'étape 1 (Base Config)
+        VNC_USER="$USER_NAME"
+    fi
+    
+    # 2. Demande du mot de passe uniquement
+    VNC_PASS=$(bsddialog --title "Configuration X11VNC" --insecure --passwordbox "Définissez un mot de passe d'accès VNC pour l'utilisateur '$VNC_USER' :" 8 65 3>&1 1>&2 2>&3)
+    [ -z "$VNC_PASS" ] && return
+
+    bsddialog --infobox "Installation et configuration de x11vnc..." 5 50
+    pkg install -y x11vnc
+
+    # 3. Création du mot de passe chiffré dans le dossier .vnc de l'utilisateur
+    mkdir -p "/home/$VNC_USER/.vnc"
+    x11vnc -storepasswd "$VNC_PASS" "/home/$VNC_USER/.vnc/passwd" > /dev/null 2>&1
+    
+    # Ajustement strict des droits
+    chown -R "$VNC_USER:$VNC_USER" "/home/$VNC_USER/.vnc"
+    chmod 600 "/home/$VNC_USER/.vnc/passwd"
+
+    # 4. Génération du fichier d'initialisation rc.d compatible FreeBSD daemon wrapper
+    cat > /usr/local/etc/rc.d/x11vnc <<EOF
+#!/bin/sh
+#
+# PROVIDE: x11vnc
+# REQUIRE: sddm
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="x11vnc"
+rcvar="x11vnc_enable"
+
+load_rc_config \$name
+
+# Valeurs par défaut
+: \${x11vnc_enable:="NO"}
+
+# 1. On force l'accès aux binaires de /usr/local/bin (pour trouver xauth)
+export PATH="/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin"
+
+procname="/usr/local/bin/x11vnc"
+command="/usr/sbin/daemon"
+pidfile="/var/run/\${name}.pid"
+
+# 2. Détection dynamique du fichier d'autorité SDDM au démarrage
+x11vnc_precmd() {
+    # On extrait le fichier d'autorité depuis le processus Xorg actif
+    XAUTH=\$(ps -wwaux | grep -E '/Xorg' | grep -v grep | sed -n 's/.*-auth \([^ ]*\).*/\1/p' | head -n 1)
+    
+    # Si le processus n'est pas encore totalement indexé, on liste le dossier sddm
+    if [ -z "\$XAUTH" ]; then
+        XAUTH=\$(ls /var/run/sddm/xauth_* 2>/dev/null | head -n 1)
+    fi
+    
+    if [ -n "\$XAUTH" ]; then
+        command_args="-f -p \${pidfile} \${procname} -display :0 -rfbport 5900 -rfbauth /home/$VNC_USER/.vnc/passwd -auth \$XAUTH -forever -shared -loop"
+    else
+        # Fallback classique si aucun fichier d'autorité n'est détecté
+        command_args="-f -p \${pidfile} \${procname} -display :0 -rfbport 5900 -rfbauth /home/$VNC_USER/.vnc/passwd -auth guess -forever -shared -loop"
+    fi
+}
+
+start_precmd="x11vnc_precmd"
+
+run_rc_command "\$1"
+EOF
+
+    chmod +x /usr/local/etc/rc.d/x11vnc
+    sysrc x11vnc_enable="YES"
+    
+    # Tentative de démarrage du service
+    service x11vnc restart 2>/dev/null || service x11vnc start 2>/dev/null
+    
+    bsddialog --msgbox "Serveur X11VNC installé et configuré avec succès pour '$VNC_USER' sur le port 5900 !\n\nLe service se lancera en tâche de fond immédiatement après le chargement de SDDM." 9 70
+}
+
 # --- SCRIPT START ---
 
 show_disclaimer
@@ -488,7 +571,7 @@ show_disclaimer
 # --- MAIN MENU ---
 while true; do
     MAIN_CHOICE=$(bsddialog --backtitle "$BACKTITLE" --title "$TITLE" \
-        --menu "Post-Installation Menu:" 24 85 15 \
+        --menu "Post-Installation Menu:" 25 85 16 \
         "1" "Base Config & Locales (SSH, Boot, Linux, User)" \
         "2" "CPU Management (Intel/AMD)" \
         "3" "Hardware Base (Audio, Xorg, CUPS)" \
@@ -504,6 +587,7 @@ while true; do
         "13" "NASA Theme" \
         "14" "Applications & Fonts" \
         "15" "Upgrade to LATEST Branch" \
+        "16" "X11VNC Server (Fast Connection)" \
         "Q" "Quit" 3>&1 1>&2 2>&3)
 
     case $MAIN_CHOICE in
@@ -522,6 +606,7 @@ while true; do
         13) nasa_theme ;;
         14) apps_config ;;
         15) switch_latest ;;
+        16) vnc_config ;;
         Q|q|*) break ;;
     esac
 done
